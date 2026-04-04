@@ -69,32 +69,63 @@ def summarize_text(text):
 # -----------------------------
 # MCQ GENERATION
 # -----------------------------
+def shorten_sentence(sentence, max_words=10):
+    words = sentence.split()
+    return " ".join(words[:max_words]) + ("..." if len(words) > max_words else "")
+
+
 def generate_mcqs(text, num_questions=5):
     sentences = nltk.sent_tokenize(text)
     mcqs = []
 
-    for _ in range(num_questions):
-        if len(sentences) < 3:
-            break
+    if len(sentences) < 2:
+        return []
+
+    # build frequency map
+    words = nltk.word_tokenize(text.lower())
+    words = [w for w in words if w.isalpha() and len(w) > 3]
+
+    from collections import Counter
+    freq = Counter(words)
+
+    attempts = 0
+
+    while len(mcqs) < num_questions and attempts < 50:
+        attempts += 1
 
         sentence = random.choice(sentences)
-        words = sentence.split()
+        sent_words = [w for w in sentence.split() if w.isalpha()]
 
-        if len(words) < 6:
+        if len(sent_words) < 5:
             continue
 
-        answer = random.choice(words)
+        # pick most important word in sentence
+        candidates = [(w, freq[w.lower()]) for w in sent_words if len(w) > 3]
+
+        if not candidates:
+            continue
+
+        answer = max(candidates, key=lambda x: x[1])[0]
+
+        # avoid very common garbage words
+        if answer.lower() in ["the", "this", "that", "and", "for", "with"]:
+            continue
+
+        # SHORT QUESTION
         question = sentence.replace(answer, "_____")
+        question = shorten_sentence(question, 10)
 
-        options = [answer]
+        # distractors from same text (context-based)
+        distractors = list(set(words))
+        distractors = [w for w in distractors if w.lower() != answer.lower()]
+        random.shuffle(distractors)
+        distractors = distractors[:3]
 
-        while len(options) < 4:
-            rand_sentence = random.choice(sentences)
-            rand_word = random.choice(rand_sentence.split())
+        # fallback safety
+        while len(distractors) < 3:
+            distractors.append(random.choice(words))
 
-            if rand_word not in options and len(rand_word) > 2:
-                options.append(rand_word)
-
+        options = distractors + [answer]
         random.shuffle(options)
 
         mcqs.append({
@@ -104,7 +135,6 @@ def generate_mcqs(text, num_questions=5):
         })
 
     return mcqs
-
 
 # -----------------------------
 # ROUTES
