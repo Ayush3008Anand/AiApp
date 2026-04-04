@@ -131,7 +131,7 @@ def process():
             return "❌ Could not extract text"
 
         summary = summarize_text(text)
-        mcqs = generate_mcqs(summary)
+        mcqs = generate_mcqs(text)
 
         return render_template("result.html", summary=summary, mcqs=mcqs)
 
