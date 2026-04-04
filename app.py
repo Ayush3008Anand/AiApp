@@ -17,7 +17,7 @@ nltk.download('punkt_tab')
 # -----------------------------
 # HUGGINGFACE API CONFIG
 # -----------------------------
-API_URL = "https://api-inference.huggingface.co/models/sshleifer/distilbart-cnn-12-6"
+API_URL = "https://router.huggingface.co/hf-inference/models/sshleifer/distilbart-cnn-12-6"
 
 
 headers = {
