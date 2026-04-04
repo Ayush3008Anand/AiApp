@@ -1,32 +1,27 @@
 from flask import Flask, render_template, request
 import pdfplumber
 import nltk
-import random
 import requests
 import os
 
 app = Flask(__name__)
 
 # -----------------------------
-# NLTK SETUP
+# SETUP
 # -----------------------------
 nltk.download('punkt')
-nltk.download('punkt_tab')
 
+HF_TOKEN = os.environ.get("HF_TOKEN")
 
-# -----------------------------
-# HUGGINGFACE API CONFIG
-# -----------------------------
-API_URL = "https://router.huggingface.co/hf-inference/models/sshleifer/distilbart-cnn-12-6"
-
+SUMMARY_API = "https://router.huggingface.co/hf-inference/models/sshleifer/distilbart-cnn-12-6"
+QG_API = "https://router.huggingface.co/hf-inference/models/google/flan-t5-base"
 
 headers = {
-    "Authorization": f"Bearer {os.environ.get('HF_TOKEN')}"
+    "Authorization": f"Bearer {HF_TOKEN}"
 }
 
-
 # -----------------------------
-# PDF TEXT EXTRACTION
+# PDF EXTRACTION
 # -----------------------------
 def extract_text(pdf_file):
     text = ""
@@ -39,125 +34,70 @@ def extract_text(pdf_file):
 
 
 # -----------------------------
-# SUMMARIZATION
+# SUMMARY (UNCHANGED BUT CLEANED)
 # -----------------------------
 def summarize_text(text):
-    payload = {
-        "inputs": text[:1000]
-    }
-
     try:
-        response = requests.post(API_URL, headers=headers, json=payload)
+        payload = {"inputs": text[:1200]}
+        res = requests.post(SUMMARY_API, headers=headers, json=payload)
+        data = res.json()
 
-        print("Status Code:", response.status_code)
-        print("Response:", response.text)
+        if isinstance(data, list):
+            return data[0]["summary_text"]
 
-        result = response.json()
+    except:
+        pass
 
-        # ✅ Case 1: Model loading
-        if isinstance(result, dict) and "error" in result:
-            return f"⚠️ Model loading / API error: {result['error']}"
+    return "Summary not available"
 
-        # ✅ Case 2: Success
-        if isinstance(result, list):
-            return result[0]["summary_text"]
 
-        return "❌ Unexpected response format"
-
-    except Exception as e:
-        return f"❌ API Error: {str(e)}"
 # -----------------------------
-# MCQ GENERATION
+# HIGH-QUALITY QUESTION GENERATION (AI-BASED)
 # -----------------------------
-def shorten_sentence(sentence, max_words=10):
-    words = sentence.split()
-    return " ".join(words[:max_words]) + ("..." if len(words) > max_words else "")
+def generate_questions(text, limit=5):
+    try:
+        prompt = f"""
+You are an expert academic assistant.
+
+Read the text below and generate {limit} high-quality conceptual exam questions.
+
+Rules:
+- Questions must be clear and meaningful
+- No MCQ
+- No answers
+- No options
+- Only textual questions
+- Focus on important concepts
+
+TEXT:
+{text[:1500]}
+
+OUTPUT:
+"""
+
+        payload = {"inputs": prompt}
+
+        res = requests.post(QG_API, headers=headers, json=payload)
+        data = res.json()
+
+        if isinstance(data, list):
+            output = data[0]["generated_text"]
+
+            # clean and split into questions
+            questions = [
+                q.strip("- ").strip()
+                for q in output.split("\n")
+                if len(q.strip()) > 10
+            ]
+
+            return questions[:limit]
+
+    except:
+        pass
+
+    return ["Question generation failed"]
 
 
-from collections import Counter
-import random
-import nltk
-
-def shorten_sentence(sentence, max_words=12):
-    words = sentence.split()
-    return " ".join(words[:max_words]) + ("..." if len(words) > max_words else "")
-
-
-def get_key_terms(text):
-    words = nltk.word_tokenize(text.lower())
-    words = [w for w in words if w.isalpha() and len(w) > 3]
-    return Counter(words)
-
-
-def generate_mcqs(text, num_questions=5):
-    sentences = nltk.sent_tokenize(text)
-
-    if len(sentences) < 2:
-        return []
-
-    freq = get_key_terms(text)
-    mcqs = []
-    attempts = 0
-
-    while len(mcqs) < num_questions and attempts < 60:
-        attempts += 1
-
-        sentence = random.choice(sentences)
-        words = nltk.word_tokenize(sentence)
-
-        words = [w for w in words if w.isalpha() and len(w) > 3]
-
-        if len(words) < 6:
-            continue
-
-        # -----------------------------
-        # PICK BEST ANSWER (NOT RANDOM)
-        # -----------------------------
-        scored = [(w, freq[w.lower()]) for w in words]
-        scored.sort(key=lambda x: x[1], reverse=True)
-
-        answer = scored[0][0]
-
-        # skip useless words
-        if answer.lower() in ["this", "that", "there", "their", "which", "would"]:
-            continue
-
-        # -----------------------------
-        # SHORT QUESTION (EXAM STYLE)
-        # -----------------------------
-        question = sentence.replace(answer, "_____")
-        question = shorten_sentence(question, 14)
-
-        # -----------------------------
-        # SMART DISTRACTORS
-        # -----------------------------
-        pool = list(freq.keys())
-
-        distractors = [
-            w for w in pool
-            if w.lower() != answer.lower()
-            and w.isalpha()
-            and len(w) > 3
-        ]
-
-        # prefer similar frequency words (more realistic MCQs)
-        distractors = sorted(distractors, key=lambda w: abs(freq[w] - freq[answer.lower()]))
-
-        options = distractors[:3]
-
-        while len(options) < 3:
-            options.append(random.choice(pool))
-
-        options = options[:3] + [answer]
-        random.shuffle(options)
-
-        mcqs.append({
-            "question": question,
-            "options": options,
-            "answer": answer
-        })
-
-    return mcqs
 # -----------------------------
 # ROUTES
 # -----------------------------
@@ -168,32 +108,29 @@ def home():
 
 @app.route("/process", methods=["POST"])
 def process():
-    try:
-        if "pdf" not in request.files:
-            return "❌ No file uploaded"
+    pdf = request.files.get("pdf")
 
-        pdf = request.files["pdf"]
+    if not pdf or pdf.filename == "":
+        return "No file uploaded"
 
-        if pdf.filename == "":
-            return "❌ Empty file"
+    text = extract_text(pdf)
 
-        text = extract_text(pdf)
+    if not text.strip():
+        return "Could not extract text"
 
-        if len(text.strip()) == 0:
-            return "❌ Could not extract text"
+    summary = summarize_text(text)
+    questions = generate_questions(text, limit=5)
 
-        summary = summarize_text(text)
-        mcqs = generate_mcqs(text)
-
-        return render_template("result.html", summary=summary, mcqs=mcqs)
-
-    except Exception as e:
-        return f"🔥 Error: {str(e)}"
+    return render_template(
+        "result.html",
+        summary=summary,
+        questions=questions
+    )
 
 
 @app.route("/health")
 def health():
-    return "OK", 200
+    return "OK"
 
 
 # -----------------------------

@@ -1,17 +1,16 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI PDF Summarizer</title>
+    <title>AI Revision Tool</title>
 </head>
-<body style="text-align:center; font-family:Arial; margin-top:60px;">
+<body>
 
-    <h1>📄 AI PDF Summarizer + MCQ Generator</h1>
+<h2>📄 Upload PDF</h2>
 
-    <form action="/process" method="POST" enctype="multipart/form-data">
-        <input type="file" name="pdf" required>
-        <br><br>
-        <button style="padding:10px 20px;">Upload & Generate</button>
-    </form>
+<form action="/process" method="POST" enctype="multipart/form-data">
+    <input type="file" name="pdf" required>
+    <button type="submit">Generate Summary + Questions</button>
+</form>
 
 </body>
 </html>

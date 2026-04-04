@@ -1,29 +1,30 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Results</title>
+    <title>AI Revision Output</title>
 </head>
-<body style="font-family:Arial; margin:40px;">
+<body>
 
-    <h2>📌 Summary</h2>
-    <p>{{ summary }}</p>
+<h2>📌 Summary</h2>
+<p>{{ summary }}</p>
 
-    <hr>
+<hr>
 
-    <h2>🧠 MCQs</h2>
+<h2>🧠 AI Generated Revision Questions</h2>
 
-    {% for q in mcqs %}
-        <div style="margin-bottom:20px;">
-            <p><b>Q{{ loop.index }}:</b> {{ q.question }}</p>
+{% if questions %}
+    <ol>
+        {% for q in questions %}
+            <li>{{ q }}</li>
+        {% endfor %}
+    </ol>
+{% else %}
+    <p>No questions generated.</p>
+{% endif %}
 
-            {% for opt in q.options %}
-                <label>
-                    <input type="radio" name="q{{ loop.index }}">
-                    {{ opt }}
-                </label><br>
-            {% endfor %}
-        </div>
-    {% endfor %}
+<br>
+
+<a href="/">⬅ Upload Another PDF</a>
 
 </body>
 </html>
