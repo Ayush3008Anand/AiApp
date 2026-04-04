@@ -10,10 +10,8 @@ app = Flask(__name__)
 # -----------------------------
 # NLTK SETUP
 # -----------------------------
-try:
-    nltk.data.find('tokenizers/punkt')
-except:
-    nltk.download('punkt')
+nltk.download('punkt')
+nltk.download('punkt_tab')
 
 
 # -----------------------------
