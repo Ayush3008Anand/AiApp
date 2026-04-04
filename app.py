@@ -1,28 +1,30 @@
 from flask import Flask, render_template, request
 import pdfplumber
-from transformers import pipeline
 import nltk
 import random
+import requests
 import os
-
-# Download tokenizer (only once)
-nltk.download("punkt")
 
 app = Flask(__name__)
 
 # -----------------------------
-# LAZY LOAD MODEL (IMPORTANT)
+# NLTK SETUP
 # -----------------------------
-summarizer = None
+try:
+    nltk.data.find('tokenizers/punkt')
+except:
+    nltk.download('punkt')
 
-def get_summarizer():
-    global summarizer
-    if summarizer is None:
-        summarizer = pipeline(
-            "summarization",
-            model="sshleifer/distilbart-cnn-12-6"  # lighter + faster
-        )
-    return summarizer
+
+# -----------------------------
+# HUGGINGFACE API CONFIG
+# -----------------------------
+API_URL = "https://api-inference.huggingface.co/models/sshleifer/distilbart-cnn-12-6"
+
+
+headers = {
+    "Authorization": f"Bearer {os.environ.get('HF_TOKEN')}"
+}
 
 
 # -----------------------------
@@ -30,7 +32,7 @@ def get_summarizer():
 # -----------------------------
 def extract_text(pdf_file):
     text = ""
-    with pdfplumber.open(pdf_file) as pdf:
+    with pdfplumber.open(pdf_file.stream) as pdf:
         for page in pdf.pages:
             content = page.extract_text()
             if content:
@@ -39,49 +41,21 @@ def extract_text(pdf_file):
 
 
 # -----------------------------
-# CHUNK TEXT
-# -----------------------------
-def split_text(text, max_words=400):
-    words = text.split()
-    chunks = []
-
-    for i in range(0, len(words), max_words):
-        chunks.append(" ".join(words[i:i + max_words]))
-
-    return chunks
-
-
-# -----------------------------
-# SUMMARIZATION PIPELINE
+# SUMMARIZATION
 # -----------------------------
 def summarize_text(text):
-    summarizer = get_summarizer()
+    payload = {"inputs": text[:1000]}
 
-    chunks = split_text(text)
-    partial_summaries = []
+    try:
+        response = requests.post(API_URL, headers=headers, json=payload)
+        result = response.json()
 
-    for chunk in chunks:
-        try:
-            out = summarizer(
-                chunk,
-                max_length=120,
-                min_length=40,
-                do_sample=False
-            )
-            partial_summaries.append(out[0]["summary_text"])
-        except:
-            continue
-
-    combined = " ".join(partial_summaries)
-
-    final_summary = summarizer(
-        combined[:2000],
-        max_length=150,
-        min_length=50,
-        do_sample=False
-    )[0]["summary_text"]
-
-    return final_summary
+        if isinstance(result, list):
+            return result[0]["summary_text"]
+        else:
+            return "❌ Error generating summary"
+    except Exception as e:
+        return f"❌ API Error: {str(e)}"
 
 
 # -----------------------------
@@ -106,7 +80,6 @@ def generate_mcqs(text, num_questions=5):
 
         options = [answer]
 
-        # generate distractors
         while len(options) < 4:
             rand_sentence = random.choice(sentences)
             rand_word = random.choice(rand_sentence.split())
@@ -135,29 +108,36 @@ def home():
 
 @app.route("/process", methods=["POST"])
 def process():
-    pdf = request.files["pdf"]
+    try:
+        if "pdf" not in request.files:
+            return "❌ No file uploaded"
 
-    text = extract_text(pdf)
+        pdf = request.files["pdf"]
 
-    if len(text.strip()) == 0:
-        return "❌ Could not extract text from PDF"
+        if pdf.filename == "":
+            return "❌ Empty file"
 
-    summary = summarize_text(text)
-    mcqs = generate_mcqs(summary)
+        text = extract_text(pdf)
 
-    return render_template("result.html", summary=summary, mcqs=mcqs)
+        if len(text.strip()) == 0:
+            return "❌ Could not extract text"
+
+        summary = summarize_text(text)
+        mcqs = generate_mcqs(summary)
+
+        return render_template("result.html", summary=summary, mcqs=mcqs)
+
+    except Exception as e:
+        return f"🔥 Error: {str(e)}"
 
 
-# -----------------------------
-# HEALTH CHECK (IMPORTANT)
-# -----------------------------
 @app.route("/health")
 def health():
     return "OK", 200
 
 
 # -----------------------------
-# RUN APP (LOCAL ONLY)
+# RUN
 # -----------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
