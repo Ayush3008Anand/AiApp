@@ -1,6 +1,7 @@
 flask
 pdfplumber
-transformers
-torch
 nltk
 gunicorn
+
+transformers==4.36.2
+torch==2.1.2
