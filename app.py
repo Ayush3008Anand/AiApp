@@ -42,20 +42,30 @@ def extract_text(pdf_file):
 # SUMMARIZATION
 # -----------------------------
 def summarize_text(text):
-    payload = {"inputs": text[:1000]}
+    payload = {
+        "inputs": text[:1000]
+    }
 
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
+
+        print("Status Code:", response.status_code)
+        print("Response:", response.text)
+
         result = response.json()
 
+        # ✅ Case 1: Model loading
+        if isinstance(result, dict) and "error" in result:
+            return f"⚠️ Model loading / API error: {result['error']}"
+
+        # ✅ Case 2: Success
         if isinstance(result, list):
             return result[0]["summary_text"]
-        else:
-            return "❌ Error generating summary"
+
+        return "❌ Unexpected response format"
+
     except Exception as e:
         return f"❌ API Error: {str(e)}"
-
-
 # -----------------------------
 # MCQ GENERATION
 # -----------------------------
