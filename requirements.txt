@@ -1,0 +1,6 @@
+flask
+pdfplumber
+transformers
+torch
+nltk
+sentencepiece
