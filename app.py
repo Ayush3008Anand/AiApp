@@ -74,58 +74,81 @@ def shorten_sentence(sentence, max_words=10):
     return " ".join(words[:max_words]) + ("..." if len(words) > max_words else "")
 
 
+from collections import Counter
+import random
+import nltk
+
+def shorten_sentence(sentence, max_words=12):
+    words = sentence.split()
+    return " ".join(words[:max_words]) + ("..." if len(words) > max_words else "")
+
+
+def get_key_terms(text):
+    words = nltk.word_tokenize(text.lower())
+    words = [w for w in words if w.isalpha() and len(w) > 3]
+    return Counter(words)
+
+
 def generate_mcqs(text, num_questions=5):
     sentences = nltk.sent_tokenize(text)
-    mcqs = []
 
     if len(sentences) < 2:
         return []
 
-    # build frequency map
-    words = nltk.word_tokenize(text.lower())
-    words = [w for w in words if w.isalpha() and len(w) > 3]
-
-    from collections import Counter
-    freq = Counter(words)
-
+    freq = get_key_terms(text)
+    mcqs = []
     attempts = 0
 
-    while len(mcqs) < num_questions and attempts < 50:
+    while len(mcqs) < num_questions and attempts < 60:
         attempts += 1
 
         sentence = random.choice(sentences)
-        sent_words = [w for w in sentence.split() if w.isalpha()]
+        words = nltk.word_tokenize(sentence)
 
-        if len(sent_words) < 5:
+        words = [w for w in words if w.isalpha() and len(w) > 3]
+
+        if len(words) < 6:
             continue
 
-        # pick most important word in sentence
-        candidates = [(w, freq[w.lower()]) for w in sent_words if len(w) > 3]
+        # -----------------------------
+        # PICK BEST ANSWER (NOT RANDOM)
+        # -----------------------------
+        scored = [(w, freq[w.lower()]) for w in words]
+        scored.sort(key=lambda x: x[1], reverse=True)
 
-        if not candidates:
+        answer = scored[0][0]
+
+        # skip useless words
+        if answer.lower() in ["this", "that", "there", "their", "which", "would"]:
             continue
 
-        answer = max(candidates, key=lambda x: x[1])[0]
-
-        # avoid very common garbage words
-        if answer.lower() in ["the", "this", "that", "and", "for", "with"]:
-            continue
-
-        # SHORT QUESTION
+        # -----------------------------
+        # SHORT QUESTION (EXAM STYLE)
+        # -----------------------------
         question = sentence.replace(answer, "_____")
-        question = shorten_sentence(question, 10)
+        question = shorten_sentence(question, 14)
 
-        # distractors from same text (context-based)
-        distractors = list(set(words))
-        distractors = [w for w in distractors if w.lower() != answer.lower()]
-        random.shuffle(distractors)
-        distractors = distractors[:3]
+        # -----------------------------
+        # SMART DISTRACTORS
+        # -----------------------------
+        pool = list(freq.keys())
 
-        # fallback safety
-        while len(distractors) < 3:
-            distractors.append(random.choice(words))
+        distractors = [
+            w for w in pool
+            if w.lower() != answer.lower()
+            and w.isalpha()
+            and len(w) > 3
+        ]
 
-        options = distractors + [answer]
+        # prefer similar frequency words (more realistic MCQs)
+        distractors = sorted(distractors, key=lambda w: abs(freq[w] - freq[answer.lower()]))
+
+        options = distractors[:3]
+
+        while len(options) < 3:
+            options.append(random.choice(pool))
+
+        options = options[:3] + [answer]
         random.shuffle(options)
 
         mcqs.append({
@@ -135,7 +158,6 @@ def generate_mcqs(text, num_questions=5):
         })
 
     return mcqs
-
 # -----------------------------
 # ROUTES
 # -----------------------------
