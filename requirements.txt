@@ -3,4 +3,4 @@ pdfplumber
 transformers
 torch
 nltk
-sentencepiece
+gunicorn

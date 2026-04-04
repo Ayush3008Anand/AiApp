@@ -5,12 +5,24 @@ import nltk
 import random
 import os
 
+# Download tokenizer (only once)
 nltk.download("punkt")
 
 app = Flask(__name__)
 
-# Load model once
-summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+# -----------------------------
+# LAZY LOAD MODEL (IMPORTANT)
+# -----------------------------
+summarizer = None
+
+def get_summarizer():
+    global summarizer
+    if summarizer is None:
+        summarizer = pipeline(
+            "summarization",
+            model="sshleifer/distilbart-cnn-12-6"  # lighter + faster
+        )
+    return summarizer
 
 
 # -----------------------------
@@ -43,12 +55,19 @@ def split_text(text, max_words=400):
 # SUMMARIZATION PIPELINE
 # -----------------------------
 def summarize_text(text):
+    summarizer = get_summarizer()
+
     chunks = split_text(text)
     partial_summaries = []
 
     for chunk in chunks:
         try:
-            out = summarizer(chunk, max_length=120, min_length=40, do_sample=False)
+            out = summarizer(
+                chunk,
+                max_length=120,
+                min_length=40,
+                do_sample=False
+            )
             partial_summaries.append(out[0]["summary_text"])
         except:
             continue
@@ -66,7 +85,7 @@ def summarize_text(text):
 
 
 # -----------------------------
-# MCQ GENERATION (BASIC AI LOGIC)
+# MCQ GENERATION
 # -----------------------------
 def generate_mcqs(text, num_questions=5):
     sentences = nltk.sent_tokenize(text)
@@ -83,12 +102,11 @@ def generate_mcqs(text, num_questions=5):
             continue
 
         answer = random.choice(words)
-
         question = sentence.replace(answer, "_____")
 
         options = [answer]
 
-        # distractors
+        # generate distractors
         while len(options) < 4:
             rand_sentence = random.choice(sentences)
             rand_word = random.choice(rand_sentence.split())
@@ -131,7 +149,15 @@ def process():
 
 
 # -----------------------------
-# DEPLOYMENT FIX (RENDER)
+# HEALTH CHECK (IMPORTANT)
+# -----------------------------
+@app.route("/health")
+def health():
+    return "OK", 200
+
+
+# -----------------------------
+# RUN APP (LOCAL ONLY)
 # -----------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
