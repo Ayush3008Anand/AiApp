@@ -13,12 +13,13 @@ nltk.download('punkt')
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
-SUMMARY_API = "https://router.huggingface.co/hf-inference/models/sshleifer/distilbart-cnn-12-6"
-QG_API = "https://router.huggingface.co/hf-inference/models/mistralai/Mistral-7B-Instruct-v0.2"
+SUMMARY_API = "https://api-inference.huggingface.co/models/sshleifer/distilbart-cnn-12-6"
+QG_API = "https://api-inference.huggingface.co/models/google/flan-t5-large"
 
 headers = {
     "Authorization": f"Bearer {HF_TOKEN}"
 }
+
 
 # -----------------------------
 # PDF EXTRACTION
@@ -34,90 +35,98 @@ def extract_text(pdf_file):
 
 
 # -----------------------------
-# SUMMARY (UNCHANGED BUT CLEANED)
+# SAFE API CALL
+# -----------------------------
+def call_hf_api(url, payload):
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+
+        if response.status_code != 200:
+            return None, f"HTTP Error: {response.status_code} - {response.text}"
+
+        try:
+            data = response.json()
+            return data, None
+        except:
+            return None, "Invalid JSON response"
+
+    except Exception as e:
+        return None, str(e)
+
+
+# -----------------------------
+# SUMMARY
 # -----------------------------
 def summarize_text(text):
-    try:
-        payload = {"inputs": text[:1200]}
-        res = requests.post(SUMMARY_API, headers=headers, json=payload)
-        data = res.json()
+    payload = {"inputs": text[:1200]}
 
-        if isinstance(data, list):
-            return data[0]["summary_text"]
+    data, error = call_hf_api(SUMMARY_API, payload)
 
-    except:
-        pass
+    if error:
+        return "Summary not available"
+
+    if isinstance(data, list) and "summary_text" in data[0]:
+        return data[0]["summary_text"]
 
     return "Summary not available"
 
 
 # -----------------------------
-# HIGH-QUALITY QUESTION GENERATION (AI-BASED)
+# QUESTION GENERATION
 # -----------------------------
 def generate_questions(text, limit=5):
-    try:
-        prompt = f"""
-You are an expert teacher.
 
-Read the text and generate {limit} important exam-style revision questions.
+    prompt = f"""
+Generate {limit} high-quality exam-level revision questions from the text below.
 
 Rules:
 - Only questions
 - No answers
 - No numbering explanation
-- Each question should be meaningful and clear
+- Each question must be clear and meaningful
 
 Text:
 {text[:1500]}
-
-Output:
 """
 
-        payload = {
-            "inputs": prompt
-        }
+    payload = {"inputs": prompt}
 
-        response = requests.post(QG_API, headers=headers, json=payload)
+    data, error = call_hf_api(QG_API, payload)
 
-        data = response.json()
+    if error:
+        return [f"Error: {error}"]
 
-        # DEBUG (VERY IMPORTANT)
-        print("HF RESPONSE:", data)
+    # -----------------------------
+    # Extract output safely
+    # -----------------------------
+    if isinstance(data, list):
+        output = data[0].get("generated_text", "")
+    else:
+        return ["Unexpected model response"]
 
-        # -------------------------
-        # CASE 1: Normal response
-        # -------------------------
-        if isinstance(data, list):
-            output = data[0].get("generated_text", "")
+    # -----------------------------
+    # Clean output
+    # -----------------------------
+    questions = []
 
-        # -------------------------
-        # CASE 2: Dict error response
-        # -------------------------
-        elif isinstance(data, dict) and "error" in data:
-            return [f"API Error: {data['error']}"]
+    for line in output.split("\n"):
+        line = line.strip()
 
-        else:
-            return ["Unexpected model response"]
+        if len(line) > 10:
+            line = line.lstrip("-•1234567890. ")
 
-        # -------------------------
-        # CLEAN OUTPUT
-        # -------------------------
-        questions = []
-
-        for line in output.split("\n"):
-            line = line.strip()
-
-            if len(line) > 10 and "?" in line:
+            if "?" in line:
                 questions.append(line)
 
-        # fallback if no "?" format
-        if not questions:
-            questions = [q.strip("- ") for q in output.split("\n") if len(q.strip()) > 10]
+    # fallback
+    if not questions:
+        questions = [
+            q.strip("- ").strip()
+            for q in output.split("\n")
+            if len(q.strip()) > 10
+        ]
 
-        return questions[:limit] if questions else ["No questions generated"]
-
-    except Exception as e:
-        return [f"Error: {str(e)}"]
+    return questions[:limit] if questions else ["No questions generated"]
 
 
 # -----------------------------
@@ -138,7 +147,7 @@ def process():
     text = extract_text(pdf)
 
     if not text.strip():
-        return "Could not extract text"
+        return "Could not extract text from PDF"
 
     summary = summarize_text(text)
     questions = generate_questions(text, limit=5)
