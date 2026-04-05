@@ -9,18 +9,16 @@ app = Flask(__name__)
 # -----------------------------
 # CONFIG
 # -----------------------------
-
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
 if not HF_TOKEN:
-    raise ValueError("HF_TOKEN not found in environment variables")
+    raise ValueError("HF_TOKEN not found in environment variables. Please set it in your terminal/environment.")
 
-# ✅ Summary remains on the Router (Works fine for BART)
+# ✅ MANDATORY ROUTER API (2026 Standard)
 SUMMARY_API = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn"
 
-# ✅ QG switched to Direct Inference API to avoid 404
-# Using a highly reliable specialized QG model
-QG_API = "https://api-inference.huggingface.co/models/mrm8488/t5-base-finetuned-question-generation-ap"
+# ✅ GEMMA 2 (The one you accepted the license for)
+QG_API = "https://router.huggingface.co/hf-inference/models/google/gemma-2-9b-it"
 
 headers = {
     "Authorization": f"Bearer {HF_TOKEN}",
@@ -39,63 +37,70 @@ def extract_text(pdf_file):
                 if content:
                     text += content + "\n"
     except Exception as e:
-        print(f"Extraction Error: {e}")
+        print(f"PDF Extraction Error: {e}")
     return text
 
-
 # -----------------------------
-# SAFE API CALL
+# SAFE API CALL (Handles 503 Waking Up)
 # -----------------------------
 def call_hf_api(url, payload):
-    try:
-        # Standard request
-        response = requests.post(url, headers=headers, json=payload)
-
-        # Handle 503 (Model Loading) - Common on Direct API
-        if response.status_code == 503:
-            return None, "Model is currently loading on Hugging Face. Please refresh in 20 seconds."
-
-        if response.status_code != 200:
-            return None, f"HTTP Error {response.status_code}: {response.text}"
-
-        return response.json(), None
-
-    except Exception as e:
-        return None, str(e)
-
+    # Try up to 3 times in case the model is "Cold" (Loading)
+    for attempt in range(3):
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=60)
+            
+            if response.status_code == 200:
+                return response.json(), None
+            
+            # If 503, the model is loading. Wait and retry.
+            if response.status_code == 503:
+                print(f"Model is loading... attempt {attempt + 1}/3")
+                time.sleep(10)
+                continue
+                
+            return None, f"HTTP {response.status_code}: {response.text}"
+        except Exception as e:
+            return None, str(e)
+            
+    return None, "The AI model is taking too long to wake up. Please try again in 30 seconds."
 
 # -----------------------------
-# SUMMARY (UNCHANGED LOGIC)
+# SUMMARY (BART)
 # -----------------------------
 def summarize_text(text):
     payload = {
-        "inputs": text[:1200]
+        "inputs": text[:1200],
+        "parameters": {"max_length": 150, "min_length": 40}
     }
 
     data, error = call_hf_api(SUMMARY_API, payload)
 
     if error or not data:
-        return "Summary not available"
+        return "Summary generation failed. The model might be offline."
 
     if isinstance(data, list) and "summary_text" in data[0]:
         return data[0]["summary_text"]
 
     return "Summary not available"
 
-
 # -----------------------------
-# QUESTION GENERATION (UPDATED FOR T5)
+# QUESTION GENERATION (GEMMA 2)
 # -----------------------------
 def generate_questions(text, limit=5):
-    # Specialized QG models expect 'context: ' prefix
-    prompt = f"context: {text[:1000]}"
+    # Prompt tuned for Gemma-2-9b-it
+    prompt = (
+        f"Context: {text[:1000]}\n\n"
+        f"Task: Generate exactly {limit} high-quality exam revision questions based on the text above. "
+        "Each question must end with a '?'. Do not provide answers. Do not include numbering. "
+        "Output each question on a new line."
+    )
 
     payload = {
         "inputs": prompt,
         "parameters": {
-            "max_new_tokens": 256,
-            "temperature": 0.6,
-            "do_sample": True
+            "max_new_tokens": 400,
+            "temperature": 0.7,
+            "return_full_text": False
         }
     }
 
@@ -103,26 +108,24 @@ def generate_questions(text, limit=5):
 
     if error:
         return [f"Error: {error}"]
-    
-    if not data or not isinstance(data, list):
-        return ["No questions generated"]
 
-    # T5 models usually output one string with questions separated by '?'
-    output = data[0].get("generated_text", "")
-    
-    # Split the output into individual questions
-    raw_questions = output.split("?")
+    # Gemma returns a list of dicts
+    output = ""
+    if isinstance(data, list) and len(data) > 0:
+        output = data[0].get("generated_text", "")
+    elif isinstance(data, dict):
+        output = data.get("generated_text", "")
+
+    # Clean the output string into a list of questions
     questions = []
+    for line in output.split("\n"):
+        line = line.strip()
+        if "?" in line and len(line) > 15:
+            # Strip common AI artifacts
+            clean_q = line.lstrip("0123456789. -*•")
+            questions.append(clean_q)
 
-    for q in raw_questions:
-        q = q.strip()
-        if len(q) > 10:
-            # Clean up any leftover numbering or bullet points
-            clean_q = q.lstrip("-•1234567890. ")
-            questions.append(clean_q + "?")
-
-    return questions[:limit] if questions else ["No questions generated"]
-
+    return questions[:limit] if questions else ["Model could not generate formatted questions. Try another PDF."]
 
 # -----------------------------
 # ROUTES
@@ -131,18 +134,17 @@ def generate_questions(text, limit=5):
 def home():
     return render_template("index.html")
 
-
 @app.route("/process", methods=["POST"])
 def process():
     pdf = request.files.get("pdf")
 
     if not pdf or pdf.filename == "":
-        return "No file uploaded"
+        return "Please upload a valid PDF file."
 
     text = extract_text(pdf)
 
     if not text.strip():
-        return "Could not extract text from PDF"
+        return "Could not read any text from that PDF. It might be an image-only scan."
 
     summary = summarize_text(text)
     questions = generate_questions(text, limit=5)
@@ -153,15 +155,14 @@ def process():
         questions=questions
     )
 
-
 @app.route("/health")
 def health():
-    return "OK"
-
+    return "Server is healthy"
 
 # -----------------------------
 # RUN
 # -----------------------------
 if __name__ == "__main__":
+    # Standard port for local dev or Render/Railway/Heroku deployment
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
