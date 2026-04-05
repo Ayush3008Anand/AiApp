@@ -3,7 +3,7 @@ import pdfplumber
 import requests
 import os
 import time
-from google import genai  # Latest 2026 SDK
+from google import genai  # Official 2026 SDK
 
 app = Flask(__name__)
 
@@ -16,11 +16,12 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if not HF_TOKEN or not GEMINI_API_KEY:
     raise ValueError("Missing HF_TOKEN or GEMINI_API_KEY in environment variables")
 
-# ✅ SUMMARY API (KEEPING UNCHANGED AS REQUESTED)
+# ✅ SUMMARY API (BART - Stays on Hugging Face Router)
 SUMMARY_API = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn"
 
-# ✅ GEMINI CLIENT (NEW FOR QUESTIONS)
-# Model: gemini-3-flash is the 2026 standard for speed/free tier
+# ✅ GEMINI CONFIG (2026 PREVIEW ID)
+# Using 'gemini-3-flash-preview' resolves the 404 error
+MODEL_ID = "gemini-3-flash-preview"
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 headers = {
@@ -47,41 +48,54 @@ def extract_text(pdf_file):
 # SUMMARY (UNCHANGED LOGIC)
 # -----------------------------
 def summarize_text(text):
-    # Using BART via Hugging Face Router
     payload = {"inputs": text[:1200]}
     try:
         response = requests.post(SUMMARY_API, headers=headers, json=payload, timeout=30)
         if response.status_code == 200:
             data = response.json()
             return data[0].get("summary_text", "Summary not available")
-        return f"Summary Error {response.status_code}"
+        return f"Summary Error: Status {response.status_code}"
     except Exception as e:
         return f"Summary Exception: {str(e)}"
 
 # -----------------------------
-# QUESTION GENERATION (NEW GEMINI IMPLEMENTATION)
+# QUESTION GENERATION (GEMINI 3 FLASH)
 # -----------------------------
 def generate_questions(text, limit=5):
-    # We use Gemini here because it handles logic/formatting much better
+    # Gemini 3 prefers direct instructions. 
+    # We send a larger chunk of text because Gemini handles 1M+ tokens.
     prompt = (
-        f"Generate {limit} revision questions based on this text. "
-        "Rules: Output ONLY the questions, one per line, ending with '?'. No numbering.\n\n"
-        f"Text: {text[:10000]}"
+        f"Generate {limit} revision questions based on the text below. "
+        "Rules: Output ONLY the questions, one per line, ending with '?'. Do not use numbers.\n\n"
+        f"Text: {text[:15000]}"
     )
     
     try:
-        # 2026 SDK Syntax
+        # SDK 1.5+ Syntax
         response = client.models.generate_content(
-            model="gemini-3-flash", 
+            model=MODEL_ID, 
             contents=prompt
         )
         
-        # Split by newline and filter for valid lines
-        raw_lines = response.text.strip().split('\n')
-        questions = [line.strip() for line in raw_lines if '?' in line and len(line) > 10]
+        # Gemini 3.0+ automatically strips the "thinking" tokens from response.text
+        raw_output = response.text.strip().split('\n')
+        
+        # Clean and validate the list
+        questions = [q.strip() for q in raw_output if '?' in q and len(q) > 10]
         
         return questions[:limit] if questions else ["No questions generated"]
+    
     except Exception as e:
+        # If gemini-3-flash-preview is down, fallback to 2.5 stable
+        if "404" in str(e):
+            try:
+                fallback_res = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt
+                )
+                return [q.strip() for q in fallback_res.text.strip().split('\n') if '?' in q][:limit]
+            except:
+                return [f"Gemini API Error: {str(e)}"]
         return [f"Gemini API Error: {str(e)}"]
 
 # -----------------------------
@@ -101,7 +115,7 @@ def process():
     if not text.strip():
         return "Could not extract text from PDF"
 
-    # Call both AI functions
+    # Process both AI tasks
     summary = summarize_text(text)
     questions = generate_questions(text, limit=5)
 
@@ -112,5 +126,6 @@ def process():
     )
 
 if __name__ == "__main__":
+    # Ensure deployment compatibility for Render/Heroku
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
