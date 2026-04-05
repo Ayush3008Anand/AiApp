@@ -3,3 +3,4 @@ pdfplumber
 nltk
 gunicorn
 requests
+google-genai
