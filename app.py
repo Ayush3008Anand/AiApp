@@ -13,8 +13,11 @@ nltk.download('punkt')
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
-SUMMARY_API = "https://router.huggingface.co/hf-inference/models/sshleifer/distilbart-cnn-12-6"
-QG_API = "https://router.huggingface.co/hf-inference/models/google/flan-t5-large"
+if not HF_TOKEN:
+    raise ValueError("HF_TOKEN not found in environment variables")
+
+SUMMARY_API = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn"
+QG_API = "https://router.huggingface.co/hf-inference/models/mistralai/Mistral-7B-Instruct-v0.2"
 
 headers = {
     "Authorization": f"Bearer {HF_TOKEN}",
@@ -43,27 +46,28 @@ def call_hf_api(url, payload):
         response = requests.post(url, headers=headers, json=payload)
 
         if response.status_code != 200:
-            return None, f"HTTP Error: {response.status_code} - {response.text}"
+            return None, f"HTTP Error {response.status_code}: {response.text}"
 
         try:
-            data = response.json()
-            return data, None
+            return response.json(), None
         except:
-            return None, "Invalid JSON response"
+            return None, "Invalid JSON response from model"
 
     except Exception as e:
         return None, str(e)
 
 
 # -----------------------------
-# SUMMARY
+# SUMMARY (BART - STABLE)
 # -----------------------------
 def summarize_text(text):
-    payload = {"inputs": text[:1200]}
+    payload = {
+        "inputs": text[:1200]
+    }
 
     data, error = call_hf_api(SUMMARY_API, payload)
 
-    if error:
+    if error or not data:
         return "Summary not available"
 
     if isinstance(data, list) and "summary_text" in data[0]:
@@ -73,40 +77,47 @@ def summarize_text(text):
 
 
 # -----------------------------
-# QUESTION GENERATION
+# QUESTION GENERATION (MISTRAL FIXED)
 # -----------------------------
 def generate_questions(text, limit=5):
 
     prompt = f"""
+[INST]
+You are an expert teacher.
+
 Generate {limit} high-quality exam-level revision questions from the text below.
 
 Rules:
 - Only questions
 - No answers
 - No numbering explanation
-- Each question must be clear and meaningful
+- Each question must be meaningful and end with ?
 
 Text:
 {text[:1500]}
+[/INST]
 """
 
-    payload = {"inputs": prompt}
+    payload = {
+        "inputs": prompt
+    }
 
     data, error = call_hf_api(QG_API, payload)
 
-    if error:
+    if error or not data:
         return [f"Error: {error}"]
 
     # -----------------------------
     # Extract output safely
     # -----------------------------
-    if isinstance(data, list):
-        output = data[0].get("generated_text", "")
-    else:
-        return ["Unexpected model response"]
+    output = data[0].get("generated_text", "")
+
+    # remove prompt echo if present
+    if "[/INST]" in output:
+        output = output.split("[/INST]")[-1].strip()
 
     # -----------------------------
-    # Clean output
+    # Clean questions
     # -----------------------------
     questions = []
 
@@ -119,7 +130,6 @@ Text:
             if "?" in line:
                 questions.append(line)
 
-    # fallback
     if not questions:
         questions = [
             q.strip("- ").strip()
