@@ -1,28 +1,25 @@
 from flask import Flask, render_template, request
 import pdfplumber
-import nltk
 import requests
 import os
 
 app = Flask(__name__)
 
 # -----------------------------
-# SETUP
+# CONFIG
 # -----------------------------
-nltk.download('punkt')
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
 if not HF_TOKEN:
     raise ValueError("HF_TOKEN not found in environment variables")
 
-# ✅ STABLE ROUTER MODELS (CONFIRMED WORKING)
-SUMMARY_API = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn"
-QG_API = "https://router.huggingface.co/hf-inference/models/google/flan-t5-base"
+# ✅ STABLE SERVERLESS HF MODELS (NOT ROUTER)
+SUMMARY_API = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+QG_API = "https://api-inference.huggingface.co/models/google/flan-t5-large"
 
 headers = {
-    "Authorization": f"Bearer {HF_TOKEN}",
-    "Content-Type": "application/json"
+    "Authorization": f"Bearer {HF_TOKEN}"
 }
 
 # -----------------------------
@@ -77,21 +74,21 @@ def summarize_text(text):
 
 
 # -----------------------------
-# QUESTION GENERATION (FIXED)
+# QUESTION GENERATION
 # -----------------------------
 def generate_questions(text, limit=5):
 
     prompt = f"""
-Generate {limit} high-quality exam-level revision questions from the text below.
+Generate {limit} exam-level revision questions from the text below.
 
 Rules:
 - Only questions
 - Each must end with ?
 - No answers
-- No explanation
+- No numbering
 
 Text:
-{text[:1500]}
+{text[:1200]}
 """
 
     payload = {
@@ -103,32 +100,20 @@ Text:
     if error or not data:
         return [f"Error: {error}"]
 
-    # -----------------------------
-    # Extract output safely
-    # -----------------------------
-    output = data[0].get("generated_text", "")
+    output = ""
 
-    # -----------------------------
-    # Clean questions
-    # -----------------------------
+    # FLAN-T5 output format
+    if isinstance(data, list):
+        output = data[0].get("generated_text", "")
+
     questions = []
 
     for line in output.split("\n"):
         line = line.strip()
 
-        if len(line) > 10:
+        if "?" in line and len(line) > 10:
             line = line.lstrip("-•1234567890. ")
-
-            if "?" in line:
-                questions.append(line)
-
-    # fallback
-    if not questions:
-        questions = [
-            q.strip("- ").strip()
-            for q in output.split("\n")
-            if len(q.strip()) > 10
-        ]
+            questions.append(line)
 
     return questions[:limit] if questions else ["No questions generated"]
 
