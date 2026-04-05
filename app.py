@@ -14,7 +14,7 @@ nltk.download('punkt')
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
 SUMMARY_API = "https://router.huggingface.co/hf-inference/models/sshleifer/distilbart-cnn-12-6"
-QG_API = "https://router.huggingface.co/hf-inference/models/google/flan-t5-base"
+QG_API = "https://router.huggingface.co/hf-inference/models/mistralai/Mistral-7B-Instruct-v0.2"
 
 headers = {
     "Authorization": f"Bearer {HF_TOKEN}"
@@ -57,45 +57,67 @@ def summarize_text(text):
 def generate_questions(text, limit=5):
     try:
         prompt = f"""
-You are an expert academic assistant.
+You are an expert teacher.
 
-Read the text below and generate {limit} high-quality conceptual exam questions.
+Read the text and generate {limit} important exam-style revision questions.
 
 Rules:
-- Questions must be clear and meaningful
-- No MCQ
+- Only questions
 - No answers
-- No options
-- Only textual questions
-- Focus on important concepts
+- No numbering explanation
+- Each question should be meaningful and clear
 
-TEXT:
+Text:
 {text[:1500]}
 
-OUTPUT:
+Output:
 """
 
-        payload = {"inputs": prompt}
+        payload = {
+            "inputs": prompt
+        }
 
-        res = requests.post(QG_API, headers=headers, json=payload)
-        data = res.json()
+        response = requests.post(QG_API, headers=headers, json=payload)
 
+        data = response.json()
+
+        # DEBUG (VERY IMPORTANT)
+        print("HF RESPONSE:", data)
+
+        # -------------------------
+        # CASE 1: Normal response
+        # -------------------------
         if isinstance(data, list):
-            output = data[0]["generated_text"]
+            output = data[0].get("generated_text", "")
 
-            # clean and split into questions
-            questions = [
-                q.strip("- ").strip()
-                for q in output.split("\n")
-                if len(q.strip()) > 10
-            ]
+        # -------------------------
+        # CASE 2: Dict error response
+        # -------------------------
+        elif isinstance(data, dict) and "error" in data:
+            return [f"API Error: {data['error']}"]
 
-            return questions[:limit]
+        else:
+            return ["Unexpected model response"]
 
-    except:
-        pass
+        # -------------------------
+        # CLEAN OUTPUT
+        # -------------------------
+        questions = []
 
-    return ["Question generation failed"]
+        for line in output.split("\n"):
+            line = line.strip()
+
+            if len(line) > 10 and "?" in line:
+                questions.append(line)
+
+        # fallback if no "?" format
+        if not questions:
+            questions = [q.strip("- ") for q in output.split("\n") if len(q.strip()) > 10]
+
+        return questions[:limit] if questions else ["No questions generated"]
+
+    except Exception as e:
+        return [f"Error: {str(e)}"]
 
 
 # -----------------------------
