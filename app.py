@@ -13,11 +13,12 @@ nltk.download('punkt')
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
-SUMMARY_API = "https://api-inference.huggingface.co/models/sshleifer/distilbart-cnn-12-6"
-QG_API = "https://api-inference.huggingface.co/models/google/flan-t5-large"
+SUMMARY_API = "https://router.huggingface.co/hf-inference/models/sshleifer/distilbart-cnn-12-6"
+QG_API = "https://router.huggingface.co/hf-inference/models/google/flan-t5-large"
 
 headers = {
-    "Authorization": f"Bearer {HF_TOKEN}"
+    "Authorization": f"Bearer {HF_TOKEN}",
+    "Content-Type": "application/json"
 }
 
 
