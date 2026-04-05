@@ -14,12 +14,13 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 if not HF_TOKEN:
     raise ValueError("HF_TOKEN not found in environment variables")
 
-# ✅ STABLE SERVERLESS HF MODELS (NOT ROUTER)
-SUMMARY_API = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-QG_API = "https://api-inference.huggingface.co/models/google/flan-t5-large"
+# ✅ ONLY ROUTER API (MANDATORY NOW)
+SUMMARY_API = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn"
+QG_API = "https://router.huggingface.co/hf-inference/models/google/flan-t5-large"
 
 headers = {
-    "Authorization": f"Bearer {HF_TOKEN}"
+    "Authorization": f"Bearer {HF_TOKEN}",
+    "Content-Type": "application/json"
 }
 
 # -----------------------------
@@ -45,10 +46,7 @@ def call_hf_api(url, payload):
         if response.status_code != 200:
             return None, f"HTTP Error {response.status_code}: {response.text}"
 
-        try:
-            return response.json(), None
-        except:
-            return None, "Invalid JSON response"
+        return response.json(), None
 
     except Exception as e:
         return None, str(e)
@@ -92,7 +90,11 @@ Text:
 """
 
     payload = {
-        "inputs": prompt
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 256,
+            "temperature": 0.7
+        }
     }
 
     data, error = call_hf_api(QG_API, payload)
@@ -100,11 +102,7 @@ Text:
     if error or not data:
         return [f"Error: {error}"]
 
-    output = ""
-
-    # FLAN-T5 output format
-    if isinstance(data, list):
-        output = data[0].get("generated_text", "")
+    output = data[0].get("generated_text", "")
 
     questions = []
 
