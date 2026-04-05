@@ -16,14 +16,14 @@ HF_TOKEN = os.environ.get("HF_TOKEN")
 if not HF_TOKEN:
     raise ValueError("HF_TOKEN not found in environment variables")
 
+# ✅ STABLE ROUTER MODELS (CONFIRMED WORKING)
 SUMMARY_API = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn"
-QG_API = "https://router.huggingface.co/hf-inference/models/mistralai/Mistral-7B-Instruct-v0.2"
+QG_API = "https://router.huggingface.co/hf-inference/models/google/flan-t5-base"
 
 headers = {
     "Authorization": f"Bearer {HF_TOKEN}",
     "Content-Type": "application/json"
 }
-
 
 # -----------------------------
 # PDF EXTRACTION
@@ -51,14 +51,14 @@ def call_hf_api(url, payload):
         try:
             return response.json(), None
         except:
-            return None, "Invalid JSON response from model"
+            return None, "Invalid JSON response"
 
     except Exception as e:
         return None, str(e)
 
 
 # -----------------------------
-# SUMMARY (BART - STABLE)
+# SUMMARY
 # -----------------------------
 def summarize_text(text):
     payload = {
@@ -77,25 +77,21 @@ def summarize_text(text):
 
 
 # -----------------------------
-# QUESTION GENERATION (MISTRAL FIXED)
+# QUESTION GENERATION (FIXED)
 # -----------------------------
 def generate_questions(text, limit=5):
 
     prompt = f"""
-[INST]
-You are an expert teacher.
-
 Generate {limit} high-quality exam-level revision questions from the text below.
 
 Rules:
 - Only questions
+- Each must end with ?
 - No answers
-- No numbering explanation
-- Each question must be meaningful and end with ?
+- No explanation
 
 Text:
 {text[:1500]}
-[/INST]
 """
 
     payload = {
@@ -112,10 +108,6 @@ Text:
     # -----------------------------
     output = data[0].get("generated_text", "")
 
-    # remove prompt echo if present
-    if "[/INST]" in output:
-        output = output.split("[/INST]")[-1].strip()
-
     # -----------------------------
     # Clean questions
     # -----------------------------
@@ -130,6 +122,7 @@ Text:
             if "?" in line:
                 questions.append(line)
 
+    # fallback
     if not questions:
         questions = [
             q.strip("- ").strip()
